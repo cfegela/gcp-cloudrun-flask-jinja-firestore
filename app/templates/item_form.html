@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}{% if item %}Edit{% else %}Create{% endif %} Item - Flask CRUD App{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <div class="form-card">
+        <h1>{% if item %}Edit Item{% else %}Create New Item{% endif %}</h1>
+        <form method="POST" class="item-form">
+            <div class="form-group">
+                <label for="title">Title</label>
+                <input type="text" id="title" name="title" value="{{ item.title if item else '' }}" required autofocus>
+            </div>
+
+            <div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" rows="5">{{ item.description if item else '' }}</textarea>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">{% if item %}Update{% else %}Create{% endif %}</button>
+                <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

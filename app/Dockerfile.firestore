@@ -1,0 +1,20 @@
+FROM eclipse-temurin:21-jre
+
+# Install necessary tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install gcloud SDK
+RUN curl https://sdk.cloud.google.com | bash
+
+ENV PATH="/root/google-cloud-sdk/bin:${PATH}"
+
+# Install Firestore emulator component
+RUN gcloud components install cloud-firestore-emulator --quiet
+
+# Expose Firestore emulator port
+EXPOSE 8080
+
+CMD ["gcloud", "emulators", "firestore", "start", "--host-port=0.0.0.0:8080"]
