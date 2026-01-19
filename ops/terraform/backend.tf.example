@@ -1,0 +1,10 @@
+# Example backend configuration for storing Terraform state in GCS
+# Uncomment and configure for production use
+# To use: cp backend.tf.example backend.tf and update the bucket name
+
+# terraform {
+#   backend "gcs" {
+#     bucket = "your-terraform-state-bucket"
+#     prefix = "terraform/state/flask-crud-app"
+#   }
+# }

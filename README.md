@@ -22,25 +22,36 @@ A modern full-stack web application built with Flask, featuring a Jinja2 fronten
 ## Project Structure
 
 ```
-app/
-├── app.py                 # Main Flask application
-├── config.py              # Configuration settings
-├── db.py                  # Firestore database initialization
-├── models.py              # User and Item models
-├── auth.py                # Authentication helpers and decorators
-├── requirements.txt       # Python dependencies
-├── Dockerfile             # Docker configuration
-├── docker-compose.yml     # Docker Compose setup
-├── .env.example           # Environment variables template
-├── templates/             # Jinja2 templates
-│   ├── base.html
-│   ├── login.html
-│   ├── register.html
-│   ├── dashboard.html
-│   └── item_form.html
-└── static/
-    └── css/
-        └── style.css      # Application styles
+.
+├── app/                       # Flask application
+│   ├── app.py                 # Main Flask application
+│   ├── config.py              # Configuration settings
+│   ├── db.py                  # Firestore database initialization
+│   ├── models.py              # User and Item models
+│   ├── auth.py                # Authentication helpers and decorators
+│   ├── requirements.txt       # Python dependencies
+│   ├── Dockerfile             # Docker configuration
+│   ├── docker-compose.yml     # Docker Compose setup
+│   ├── .env.example           # Environment variables template
+│   ├── templates/             # Jinja2 templates
+│   │   ├── base.html
+│   │   ├── login.html
+│   │   ├── register.html
+│   │   ├── dashboard.html
+│   │   └── item_form.html
+│   └── static/
+│       └── css/
+│           └── style.css      # Application styles
+├── ops/                       # Operations and infrastructure
+│   └── terraform/             # Terraform configuration for GCP
+│       ├── main.tf            # Main infrastructure resources
+│       ├── variables.tf       # Input variables
+│       ├── outputs.tf         # Output values
+│       ├── versions.tf        # Provider versions
+│       ├── terraform.tfvars.example
+│       ├── backend.tf.example # GCS backend configuration
+│       └── README.md          # Terraform documentation
+└── README.md                  # This file
 ```
 
 ## Getting Started
@@ -203,17 +214,86 @@ Configure these in `app/.env` file:
 
 ## Deployment to Google Cloud Run
 
-### Prerequisites
+You can deploy this application using either Terraform (recommended) or the gcloud CLI.
+
+### Option 1: Terraform Deployment (Recommended)
+
+Terraform provides infrastructure-as-code for repeatable, version-controlled deployments.
+
+#### Prerequisites
+- Google Cloud account with billing enabled
+- [Terraform](https://www.terraform.io/downloads.html) >= 1.0
+- [gcloud CLI](https://cloud.google.com/sdk/docs/install) installed and authenticated
+- Docker installed
+
+#### Steps
+
+1. **Authenticate with GCP**
+   ```bash
+   gcloud auth application-default login
+   gcloud config set project YOUR_PROJECT_ID
+   ```
+
+2. **Configure Terraform variables**
+   ```bash
+   cd ops/terraform
+   cp terraform.tfvars.example terraform.tfvars
+   # Edit terraform.tfvars with your project ID and preferences
+   ```
+
+3. **Initialize and deploy infrastructure**
+   ```bash
+   terraform init
+   terraform plan
+   terraform apply
+   ```
+
+4. **Build and push Docker image**
+   ```bash
+   # Get the Artifact Registry URL from Terraform output
+   export DOCKER_REPO=$(terraform output -raw artifact_registry_repository)
+
+   # Configure Docker authentication
+   gcloud auth configure-docker $(echo $DOCKER_REPO | cut -d'/' -f1)
+
+   # Build and push image
+   cd ../../app
+   docker build -t ${DOCKER_REPO}/flask-app:latest .
+   docker push ${DOCKER_REPO}/flask-app:latest
+   ```
+
+5. **Access your application**
+   ```bash
+   cd ../ops/terraform
+   terraform output cloud_run_url
+   ```
+
+**Resources Created:**
+- Cloud Run service with autoscaling
+- Firestore database (Native mode)
+- Secret Manager secrets (auto-generated)
+- Artifact Registry repository
+- Service account with minimal permissions
+- IAM bindings for secure access
+
+For detailed Terraform documentation, see [ops/terraform/README.md](ops/terraform/README.md).
+
+### Option 2: gcloud CLI Deployment
+
+For quick deployments without infrastructure-as-code.
+
+#### Prerequisites
 - Google Cloud account
 - gcloud CLI installed
 - Firestore database created in your GCP project
 
-### Steps
+#### Steps
 
 1. **Enable required APIs**
    ```bash
    gcloud services enable run.googleapis.com
    gcloud services enable firestore.googleapis.com
+   gcloud services enable secretmanager.googleapis.com
    ```
 
 2. **Create Firestore database** (if not already created)
@@ -221,7 +301,13 @@ Configure these in `app/.env` file:
    - Navigate to Firestore
    - Create a Native mode database
 
-3. **Build and deploy**
+3. **Set up secrets**
+   ```bash
+   echo -n "your-secret-key-here" | gcloud secrets create flask-secret --data-file=-
+   echo -n "your-jwt-secret-here" | gcloud secrets create jwt-secret --data-file=-
+   ```
+
+4. **Build and deploy**
    ```bash
    gcloud run deploy flask-crud-app \
      --source ./app \
@@ -230,12 +316,6 @@ Configure these in `app/.env` file:
      --allow-unauthenticated \
      --set-env-vars USE_FIRESTORE_EMULATOR=false,FIRESTORE_PROJECT_ID=your-project-id \
      --set-secrets SECRET_KEY=flask-secret:latest,JWT_SECRET_KEY=jwt-secret:latest
-   ```
-
-4. **Set up secrets** (recommended for production)
-   ```bash
-   echo -n "your-secret-key" | gcloud secrets create flask-secret --data-file=-
-   echo -n "your-jwt-secret" | gcloud secrets create jwt-secret --data-file=-
    ```
 
 ## Security Considerations
