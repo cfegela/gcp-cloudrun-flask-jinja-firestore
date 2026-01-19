@@ -55,17 +55,17 @@ app/
 1. **Clone the repository**
    ```bash
    git clone <your-repo-url>
-   cd gcp-cloudrun-flask-jinja-firestore/app
+   cd gcp-cloudrun-flask-jinja-firestore
    ```
 
 2. **Create environment file**
    ```bash
-   cp .env.example .env
+   cp app/.env.example app/.env
    ```
 
 3. **Start the application with Docker Compose**
    ```bash
-   docker-compose up --build
+   cd app && docker-compose up --build
    ```
 
    This will start:
@@ -176,7 +176,7 @@ Authorization: Bearer <your-jwt-token>
 
 2. **Install dependencies**
    ```bash
-   pip install -r requirements.txt
+   pip install -r app/requirements.txt
    ```
 
 3. **Start Firestore emulator separately**
@@ -187,12 +187,12 @@ Authorization: Bearer <your-jwt-token>
 4. **Run the application**
    ```bash
    export FIRESTORE_EMULATOR_HOST=localhost:8080
-   python app.py
+   python app/app.py
    ```
 
 ### Environment Variables
 
-Configure these in `.env` file:
+Configure these in `app/.env` file:
 
 - `SECRET_KEY`: Flask session secret key
 - `JWT_SECRET_KEY`: JWT token signing key
@@ -224,7 +224,7 @@ Configure these in `.env` file:
 3. **Build and deploy**
    ```bash
    gcloud run deploy flask-crud-app \
-     --source . \
+     --source ./app \
      --platform managed \
      --region us-central1 \
      --allow-unauthenticated \
