@@ -53,8 +53,7 @@ A modern full-stack web application built with Flask, featuring a Jinja2 fronten
 │       ├── outputs.tf         # Output values
 │       ├── versions.tf        # Provider versions
 │       ├── terraform.tfvars.example
-│       ├── backend.tf.example # GCS backend configuration
-│       └── README.md          # Terraform documentation
+│       └── backend.tf.example # GCS backend configuration
 └── README.md                  # This file
 ```
 
@@ -230,7 +229,7 @@ Terraform provides infrastructure-as-code for repeatable, version-controlled dep
 - [gcloud CLI](https://cloud.google.com/sdk/docs/install) installed and authenticated
 - Docker or Podman installed
 
-#### Steps
+#### Quick Start
 
 1. **Authenticate with GCP**
    ```bash
@@ -248,8 +247,11 @@ Terraform provides infrastructure-as-code for repeatable, version-controlled dep
    ```bash
    cd ops/terraform
 
-   # Create terraform.tfvars with your project ID
-   echo 'project_id = "YOUR_PROJECT_ID"' > terraform.tfvars
+   # Copy example configuration
+   cp terraform.tfvars.example terraform.tfvars
+
+   # Edit terraform.tfvars with your project ID
+   # Minimum required: project_id = "YOUR_PROJECT_ID"
    ```
 
 3. **Initialize Terraform**
@@ -257,18 +259,18 @@ Terraform provides infrastructure-as-code for repeatable, version-controlled dep
    terraform init
    ```
 
-4. **Preview and apply infrastructure**
-   ```bash
-   # Preview changes
-   terraform plan
+#### Deployment Workflow
 
-   # Apply changes (creates all infrastructure)
-   terraform apply
+**Option A: Two-Step Deployment (Recommended for First Deploy)**
+
+This approach creates the Artifact Registry first, then builds and pushes the image.
+
+1. **Create Artifact Registry:**
+   ```bash
+   terraform apply -target=google_artifact_registry_repository.app_repo
    ```
 
-   This will create all necessary GCP resources but will fail initially because the Docker image doesn't exist yet.
-
-5. **Build and push Docker image**
+2. **Build and push Docker image:**
 
    **Important**: Cloud Run requires AMD64/x86_64 architecture. If you're on Apple Silicon (M1/M2/M3), you must specify the platform:
 
@@ -293,21 +295,125 @@ Terraform provides infrastructure-as-code for repeatable, version-controlled dep
    podman push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest
    ```
 
-6. **Complete deployment**
+3. **Deploy remaining infrastructure:**
    ```bash
    cd ../ops/terraform
-
-   # Apply again to deploy Cloud Run service with the image
    terraform apply
    ```
 
-7. **Access your application**
+4. **Access your application:**
    ```bash
-   # Get the Cloud Run URL
    terraform output cloud_run_url
    ```
 
-   Visit the URL to access your deployed application!
+**Option B: Update Image After Infrastructure**
+
+1. **Deploy all infrastructure:**
+   ```bash
+   cd ops/terraform
+   terraform apply
+   ```
+
+   This may initially fail on Cloud Run deployment if the image doesn't exist yet.
+
+2. **Build and push Docker image** (see Option A step 2 above)
+
+3. **Force Cloud Run to redeploy:**
+   ```bash
+   gcloud run services update flask-crud-app \
+     --region us-central1 \
+     --image us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest
+   ```
+
+#### Configuration Options
+
+Edit `terraform.tfvars` to customize your deployment:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `project_id` | GCP Project ID | Required |
+| `region` | GCP region | `us-central1` |
+| `service_name` | Cloud Run service name | `flask-crud-app` |
+| `firestore_location` | Firestore database location | `nam5` |
+| `environment` | Environment name | `dev` |
+| `allow_unauthenticated` | Allow public access | `true` |
+| `min_instances` | Minimum instances | `0` |
+| `max_instances` | Maximum instances | `10` |
+| `cpu_limit` | CPU limit | `1000m` |
+| `memory_limit` | Memory limit | `512Mi` |
+
+#### Backend Configuration (Optional)
+
+For production environments, use Google Cloud Storage for Terraform state:
+
+```bash
+# Create a GCS bucket for state
+gsutil mb gs://your-terraform-state-bucket
+
+# Configure backend
+cd ops/terraform
+cp backend.tf.example backend.tf
+# Edit backend.tf with your bucket name
+
+# Reinitialize Terraform
+terraform init
+```
+
+#### Updating the Application
+
+To update your application after making code changes:
+
+```bash
+# Build new image
+cd app
+docker build --platform linux/amd64 \
+  -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest .
+
+# Push to registry
+docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest
+
+# Update Cloud Run service
+gcloud run services update flask-crud-app \
+  --region us-central1 \
+  --image us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest
+```
+
+Or use Terraform to update configuration:
+
+```bash
+cd ops/terraform
+terraform apply
+```
+
+#### Resources Created
+
+Terraform creates and manages these resources:
+
+- **Cloud Run Service**: Hosts the Flask application with autoscaling (0-10 instances)
+  - Image: Built for linux/amd64 architecture
+  - Port: Dynamically assigned by Cloud Run via PORT environment variable
+  - Resources: 1 CPU, 512Mi memory
+  - Timeout: 300s
+- **Firestore Database**: Native mode database (nam5 region) for data persistence
+- **Secret Manager Secrets**: Auto-generated `flask-secret-dev` and `jwt-secret-dev`
+- **Artifact Registry Repository**: Docker repository for application images
+- **Service Account**: Dedicated service account with minimal permissions (datastore.user role)
+- **IAM Bindings**: Proper access controls for Firestore and Secret Manager
+- **Required GCP APIs**: Cloud Run, Firestore, Artifact Registry, Secret Manager, Cloud Build
+
+#### Terraform Outputs
+
+After successful deployment, view useful information:
+
+```bash
+terraform output
+```
+
+Available outputs:
+- `cloud_run_url`: Application URL
+- `artifact_registry_repository`: Docker repository URL
+- `docker_image_url`: Full image path
+- `service_account_email`: Service account used by Cloud Run
 
 #### Destroying Infrastructure
 
@@ -318,24 +424,43 @@ cd ops/terraform
 terraform destroy
 ```
 
-This will remove all created resources from GCP. Note that the Firestore database uses deletion_policy = "ABANDON" so it won't be deleted (to prevent accidental data loss).
+**Note**: The Firestore database uses `deletion_policy = "ABANDON"` so it won't be deleted automatically (to prevent accidental data loss). You'll need to delete it manually from the GCP Console if desired.
 
-**Resources Created:**
-- Cloud Run service with autoscaling (0-10 instances)
-- Firestore database (Native mode, nam5 region)
-- Secret Manager secrets (flask-secret-dev, jwt-secret-dev - auto-generated)
-- Artifact Registry repository (Docker)
-- Service account with minimal permissions (datastore.user role)
-- IAM bindings for secure access between services
-- Required GCP APIs (Cloud Run, Firestore, Artifact Registry, Secret Manager, Cloud Build)
+#### Terraform-Specific Security Considerations
 
-**Container Configuration:**
-- Image: Built for linux/amd64 architecture
-- Port: Dynamically assigned by Cloud Run via PORT environment variable
-- Resources: 1 CPU, 512Mi memory
-- Timeout: 300s
+For production deployments:
+- Set `allow_unauthenticated = false` in terraform.tfvars
+- Use Cloud Identity-Aware Proxy (IAP) or Firebase Auth
+- Enable VPC Service Controls
+- Use GCS backend for Terraform state with versioning enabled
+- Enable audit logging
+- Review and restrict IAM permissions regularly
 
-For detailed Terraform documentation, see [ops/terraform/README.md](ops/terraform/README.md).
+#### Terraform Troubleshooting
+
+**API Not Enabled Error**
+
+Manually enable required APIs:
+```bash
+gcloud services enable run.googleapis.com
+gcloud services enable firestore.googleapis.com
+gcloud services enable secretmanager.googleapis.com
+gcloud services enable artifactregistry.googleapis.com
+```
+
+**Docker Push Permission Denied**
+
+Ensure you're authenticated:
+```bash
+gcloud auth configure-docker us-central1-docker.pkg.dev
+```
+
+**Firestore Already Exists Error**
+
+If Firestore database already exists in your project, import it:
+```bash
+terraform import google_firestore_database.database "(default)"
+```
 
 ### Option 2: gcloud CLI Deployment
 
