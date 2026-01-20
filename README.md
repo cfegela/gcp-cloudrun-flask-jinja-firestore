@@ -10,14 +10,18 @@ A modern full-stack web application built with Flask, featuring a Jinja2 fronten
 - **RESTful API**: JSON API endpoints for programmatic access
 - **Responsive UI**: Clean, modern Jinja2 templates with responsive CSS
 - **Docker Support**: Complete Docker Compose setup for local development
+- **Cloud Native**: Production-ready deployment to Google Cloud Run with Terraform
+- **Auto-scaling**: Scales from 0 to 10 instances based on traffic
+- **Secure Secrets**: Automatic secret generation and management with Secret Manager
 
 ## Tech Stack
 
-- **Backend**: Flask 3.0
+- **Backend**: Flask 3.0 with Gunicorn
 - **Database**: Google Cloud Firestore
 - **Authentication**: JWT tokens with bcrypt password hashing
 - **Frontend**: Jinja2 templates with modern CSS
-- **Deployment**: Docker & Docker Compose
+- **Deployment**: Docker & Docker Compose (local), Google Cloud Run (production)
+- **Infrastructure**: Terraform for infrastructure-as-code
 
 ## Project Structure
 
@@ -224,57 +228,112 @@ Terraform provides infrastructure-as-code for repeatable, version-controlled dep
 - Google Cloud account with billing enabled
 - [Terraform](https://www.terraform.io/downloads.html) >= 1.0
 - [gcloud CLI](https://cloud.google.com/sdk/docs/install) installed and authenticated
-- Docker installed
+- Docker or Podman installed
 
 #### Steps
 
 1. **Authenticate with GCP**
    ```bash
+   # Login to gcloud
+   gcloud auth login
+
+   # Set up application default credentials for Terraform
    gcloud auth application-default login
+
+   # Set your project
    gcloud config set project YOUR_PROJECT_ID
    ```
 
 2. **Configure Terraform variables**
    ```bash
    cd ops/terraform
-   cp terraform.tfvars.example terraform.tfvars
-   # Edit terraform.tfvars with your project ID and preferences
+
+   # Create terraform.tfvars with your project ID
+   echo 'project_id = "YOUR_PROJECT_ID"' > terraform.tfvars
    ```
 
-3. **Initialize and deploy infrastructure**
+3. **Initialize Terraform**
    ```bash
    terraform init
+   ```
+
+4. **Preview and apply infrastructure**
+   ```bash
+   # Preview changes
    terraform plan
+
+   # Apply changes (creates all infrastructure)
    terraform apply
    ```
 
-4. **Build and push Docker image**
+   This will create all necessary GCP resources but will fail initially because the Docker image doesn't exist yet.
+
+5. **Build and push Docker image**
+
+   **Important**: Cloud Run requires AMD64/x86_64 architecture. If you're on Apple Silicon (M1/M2/M3), you must specify the platform:
+
    ```bash
-   # Get the Artifact Registry URL from Terraform output
-   export DOCKER_REPO=$(terraform output -raw artifact_registry_repository)
-
-   # Configure Docker authentication
-   gcloud auth configure-docker $(echo $DOCKER_REPO | cut -d'/' -f1)
-
-   # Build and push image
    cd ../../app
-   docker build -t ${DOCKER_REPO}/flask-app:latest .
-   docker push ${DOCKER_REPO}/flask-app:latest
+
+   # Configure Docker/Podman authentication
+   gcloud auth configure-docker us-central1-docker.pkg.dev
+
+   # Build for AMD64 architecture (required for Cloud Run)
+   # Using Docker:
+   docker build --platform linux/amd64 \
+     -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest .
+
+   # OR using Podman:
+   podman build --platform linux/amd64 \
+     -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest .
+
+   # Push the image
+   docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest
+   # OR
+   podman push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/flask-crud-app-repo/flask-app:latest
    ```
 
-5. **Access your application**
+6. **Complete deployment**
    ```bash
    cd ../ops/terraform
+
+   # Apply again to deploy Cloud Run service with the image
+   terraform apply
+   ```
+
+7. **Access your application**
+   ```bash
+   # Get the Cloud Run URL
    terraform output cloud_run_url
    ```
 
+   Visit the URL to access your deployed application!
+
+#### Destroying Infrastructure
+
+When you're done and want to remove all resources:
+
+```bash
+cd ops/terraform
+terraform destroy
+```
+
+This will remove all created resources from GCP. Note that the Firestore database uses deletion_policy = "ABANDON" so it won't be deleted (to prevent accidental data loss).
+
 **Resources Created:**
-- Cloud Run service with autoscaling
-- Firestore database (Native mode)
-- Secret Manager secrets (auto-generated)
-- Artifact Registry repository
-- Service account with minimal permissions
-- IAM bindings for secure access
+- Cloud Run service with autoscaling (0-10 instances)
+- Firestore database (Native mode, nam5 region)
+- Secret Manager secrets (flask-secret-dev, jwt-secret-dev - auto-generated)
+- Artifact Registry repository (Docker)
+- Service account with minimal permissions (datastore.user role)
+- IAM bindings for secure access between services
+- Required GCP APIs (Cloud Run, Firestore, Artifact Registry, Secret Manager, Cloud Build)
+
+**Container Configuration:**
+- Image: Built for linux/amd64 architecture
+- Port: Dynamically assigned by Cloud Run via PORT environment variable
+- Resources: 1 CPU, 512Mi memory
+- Timeout: 300s
 
 For detailed Terraform documentation, see [ops/terraform/README.md](ops/terraform/README.md).
 
@@ -318,15 +377,43 @@ For quick deployments without infrastructure-as-code.
      --set-secrets SECRET_KEY=flask-secret:latest,JWT_SECRET_KEY=jwt-secret:latest
    ```
 
+## Troubleshooting
+
+### Docker Build Issues
+
+**Problem**: "exec format error" when deploying to Cloud Run
+
+**Solution**: Cloud Run requires AMD64/x86_64 architecture. If building on Apple Silicon (ARM64), use the `--platform linux/amd64` flag:
+```bash
+docker build --platform linux/amd64 -t your-image .
+```
+
+### Authentication Issues
+
+**Problem**: Terraform fails with "no credentials" error
+
+**Solution**: Run both authentication commands:
+```bash
+gcloud auth login                           # For gcloud CLI
+gcloud auth application-default login       # For Terraform/SDK
+```
+
+### Port Configuration
+
+The Dockerfile is configured to use Cloud Run's dynamic PORT environment variable:
+- Local development: Port 5000 (Docker Compose)
+- Cloud Run: Dynamic port assigned via $PORT environment variable
+
 ## Security Considerations
 
 - Change default `SECRET_KEY` and `JWT_SECRET_KEY` in production
 - Use environment variables for sensitive configuration
-- Enable HTTPS in production
+- Enable HTTPS in production (automatic with Cloud Run)
 - Implement rate limiting for API endpoints
 - Add CSRF protection for web forms
 - Use secure password requirements
 - Implement session timeout
+- Review IAM permissions and service account roles regularly
 
 ## Contributing
 
